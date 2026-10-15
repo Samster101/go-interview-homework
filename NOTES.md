@@ -3,6 +3,7 @@
 When I first ran the seed script, Go reported missing checksum entries for some of the `pgx` dependencies. I ran `go mod tidy` to resolve the required modules and update `go.mod` and `go.sum`. After that, the project compiled and the seed script ran with an expected error.
 
 ## -- Part 1
+
 Error encountered while trying seed script:
 
 " seed: insert task "Draft analytical engine notes": ERROR: syntax error at or near "`" (SQLSTATE 42601)
@@ -27,3 +28,9 @@ I used straightforward field resolvers for `User.tasks`. With the small seeded d
 GraphQL IDs arrive as strings and are validated before being converted to PostgreSQL `BIGINT` values. Task dates are validated and returned as `YYYY-MM-DD`, matching the database `DATE` column and the required GraphQL `String` field. GraphQL task statuses are mapped explicitly to the lowercase PostgreSQL enum values.
 
 Missing records return `null` from nullable queries and useful errors from mutations. Unexpected database errors are logged on the server and returned to clients as a generic error so SQL details are not exposed.
+
+
+## -- Part 3
+
+I chose `description` as the required new field and also exposed `dueDate`. Both fields were already present in the GraphQL `Task` schema and populated from Postgres. I updated `web/app.js` to request them and render the description and formatted due date on each task card. This made the supplied UI more useful without adding a frontend framework.
+

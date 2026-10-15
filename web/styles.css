@@ -129,6 +129,17 @@ main {
   color: var(--ally-off-white);
 }
 
+.task-description {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ally-lavender);
+}
+
+.due-date {
+  font-size: 11px;
+  color: var(--ally-lavender);
+}
+
 .task-meta {
   display: flex;
   flex-wrap: wrap;
