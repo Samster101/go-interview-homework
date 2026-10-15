@@ -156,6 +156,48 @@ func TestInvalidInputAndMissingRecords(t *testing.T) {
 			t.Fatalf("unexpected missing-task error: %v", err)
 		}
 	})
+
+	t.Run("missing task query returns null", func(t *testing.T) {
+		fake := &fakeStore{getTask: func(context.Context, int64) (*model.Task, error) {
+			return nil, store.ErrNotFound
+		}}
+		task, err := (&queryResolver{&Resolver{Store: fake}}).Task(context.Background(), "99")
+		if err != nil || task != nil {
+			t.Fatalf("Task returned task=%#v error=%v, want nil, nil", task, err)
+		}
+	})
+
+	t.Run("blank title rejected", func(t *testing.T) {
+		fake := &fakeStore{createTask: func(context.Context, int64, string, *string, *string, []string) (*model.Task, error) {
+			t.Fatal("store must not be called for a blank title")
+			return nil, nil
+		}}
+		blank := "   "
+		if _, err := (&mutationResolver{&Resolver{Store: fake}}).CreateTask(context.Background(), "1", blank, nil, nil, nil); err == nil {
+			t.Fatal("CreateTask returned no error for a blank title")
+		}
+	})
+
+	t.Run("invalid due date format rejected", func(t *testing.T) {
+		fake := &fakeStore{createTask: func(context.Context, int64, string, *string, *string, []string) (*model.Task, error) {
+			t.Fatal("store must not be called for an invalid due date")
+			return nil, nil
+		}}
+		bad := "01-15-2026"
+		if _, err := (&mutationResolver{&Resolver{Store: fake}}).CreateTask(context.Background(), "1", "title", nil, &bad, nil); err == nil {
+			t.Fatal("CreateTask returned no error for an invalid due date format")
+		}
+	})
+
+	t.Run("user not found in createTask", func(t *testing.T) {
+		fake := &fakeStore{createTask: func(context.Context, int64, string, *string, *string, []string) (*model.Task, error) {
+			return nil, store.ErrNotFound
+		}}
+		_, err := (&mutationResolver{&Resolver{Store: fake}}).CreateTask(context.Background(), "5", "title", nil, nil, nil)
+		if err == nil || err.Error() != "user 5 was not found" {
+			t.Fatalf("unexpected user-not-found error: %v", err)
+		}
+	})
 }
 
 func TestPaginationValidation(t *testing.T) {

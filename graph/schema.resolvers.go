@@ -18,6 +18,8 @@ import (
 
 // CreateTask is the resolver for the createTask field.
 func (r *mutationResolver) CreateTask(ctx context.Context, userID string, title string, description *string, dueDate *string, tags []string) (*model.Task, error) {
+	start := time.Now()
+	defer func() { r.logTiming("createTask", start) }()
 	databaseUserID, err := parseID(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid userId: %w", err)
@@ -50,6 +52,8 @@ func (r *mutationResolver) CreateTask(ctx context.Context, userID string, title 
 
 // UpdateTaskStatus is the resolver for the updateTaskStatus field.
 func (r *mutationResolver) UpdateTaskStatus(ctx context.Context, id string, status model.TaskStatus) (*model.Task, error) {
+	start := time.Now()
+	defer func() { r.logTiming("updateTaskStatus", start) }()
 	databaseID, err := parseID(id)
 	if err != nil {
 		return nil, fmt.Errorf("invalid task id: %w", err)
@@ -66,6 +70,8 @@ func (r *mutationResolver) UpdateTaskStatus(ctx context.Context, id string, stat
 
 // User is the resolver for the user field.
 func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error) {
+	start := time.Now()
+	defer func() { r.logTiming("user", start) }()
 	databaseID, err := parseID(id)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user id: %w", err)
@@ -82,6 +88,8 @@ func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error
 
 // Users is the resolver for the users field.
 func (r *queryResolver) Users(ctx context.Context, limit int, offset int) ([]*model.User, error) {
+	start := time.Now()
+	defer func() { r.logTiming("users", start) }()
 	if err := validatePagination(limit, offset); err != nil {
 		return nil, err
 	}
@@ -94,6 +102,8 @@ func (r *queryResolver) Users(ctx context.Context, limit int, offset int) ([]*mo
 
 // Task is the resolver for the task field.
 func (r *queryResolver) Task(ctx context.Context, id string) (*model.Task, error) {
+	start := time.Now()
+	defer func() { r.logTiming("task", start) }()
 	databaseID, err := parseID(id)
 	if err != nil {
 		return nil, fmt.Errorf("invalid task id: %w", err)
@@ -110,6 +120,8 @@ func (r *queryResolver) Task(ctx context.Context, id string) (*model.Task, error
 
 // Tasks is the resolver for the tasks field.
 func (r *queryResolver) Tasks(ctx context.Context, status *model.TaskStatus, userID *string, limit int, offset int) ([]*model.Task, error) {
+	start := time.Now()
+	defer func() { r.logTiming("tasks", start) }()
 	if err := validatePagination(limit, offset); err != nil {
 		return nil, err
 	}
@@ -130,6 +142,8 @@ func (r *queryResolver) Tasks(ctx context.Context, status *model.TaskStatus, use
 
 // Tasks is the batch resolver for the tasks field.
 func (r *userResolver) Tasks(ctx context.Context, objs []*model.User, status *model.TaskStatus) ([][]*model.Task, error) {
+	start := time.Now()
+	defer func() { r.logTiming("user.tasks", start) }()
 	userIDs := make([]int64, len(objs))
 	for i, obj := range objs {
 		userID, err := parseID(obj.ID)
@@ -142,6 +156,7 @@ func (r *userResolver) Tasks(ctx context.Context, objs []*model.User, status *mo
 	if err != nil {
 		return nil, r.internalError("list user tasks", err)
 	}
+	// gqlgen matches batch results to parent users by slice index.
 	results := make([][]*model.Task, len(userIDs))
 	for i, userID := range userIDs {
 		results[i] = grouped[userID]

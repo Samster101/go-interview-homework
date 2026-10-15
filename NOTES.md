@@ -1,47 +1,87 @@
-### Dependency setup
+# Implementation Notes
 
-When I first ran the seed script, Go reported missing checksum entries for some of the `pgx` dependencies. I ran `go mod tidy` to resolve the required modules and update `go.mod` and `go.sum`. After that, the project compiled and the seed script ran with an expected error.
+## AI Usage
 
-## -- Part 1
+I used AI extensively throughout this assignment for planning, learning, code generation, and implementation support. I started by breaking down the requirements, familiarizing myself with the technologies involved, and evaluating different approaches before settling on an implementation plan that prioritized the core functionality.
 
-Error encountered while trying seed script:
+Rather than generating the entire application at once, I worked incrementally, building and testing one component at a time. AI helped generate significant portions of the initial code, which I then reviewed, modified, and tested to understand how each piece worked and how it fit into the overall application. This iterative approach allowed me to catch issues, refine the implementation, and build on working functionality rather than introducing too many changes at once.
 
-" seed: insert task "Draft analytical engine notes": ERROR: syntax error at or near "`" (SQLSTATE 42601)
-exit status 1 "
+Once the core requirements were met, I used AI to help evaluate potential improvements, including resolver timing, pagination, and integration tests. I prioritized additions that provided practical value within the assignment's scope and time constraints.
 
-The error pointed to a backtick in the task insert statement. I checked the `INSERT INTO tasks` query and noticed that the column names were wrapped in backticks, which PostgreSQL does not accept. I removed the backticks and ran the seed script twice. After each run, I queried the table counts and confirmed that they remained at 3 users, 7 tasks, and 9 tags rather than being duplicated
+Throughout the process, I remained involved in the architectural decisions, implementation tradeoffs, debugging, and validation, using AI as a development tool while taking responsibility for understanding and verifying the final code.
 
-## -- Part 2
+## 1. Database and Seed
 
-### Library and structure choices
+The seed script failed with PostgreSQL error `42601` due to backticks around column names in an `INSERT INTO tasks` statement. I located the query using the error message, removed the backticks, and verified that running the seed twice produced the same 3 users, 7 tasks, and 10 tags.
 
-I chose gqlgen because its schema-first workflow keeps the required GraphQL contract in one place and generates type-safe Go interfaces for the resolvers. I used v0.17.94 because the newer release requires Go 1.26, while this assignment specifies Go 1.25. The generated GraphQL execution code and models are committed, but the schema, resolver implementations, and database code remain handwritten.
+I used truncate-and-reseed for deterministic local fixtures. This is simpler than upserts but would not be appropriate for preserving shared or production data.
 
-I kept the structure small. `cmd/server` configures the HTTP server, GraphQL handler, logging, and CORS. `graph` contains the schema, resolvers, and generated gqlgen files. `internal/store` contains the PostgreSQL queries. The resolvers depend on a small store interface, which keeps database logic out of the GraphQL layer and makes the resolver behavior easy to test.
+## 2. GraphQL API
 
-The PostgreSQL store uses pgxpool. Task creation and tag insertion run in one transaction so a failed tag insert cannot leave a partial task. Task queries preload the owning user because `Task.user` is required, and tags are fetched with one bulk query rather than one query per task.
+I chose **gqlgen v0.17.94** for its schema-first design and generated type-safe resolvers. I pinned this version for Go 1.25 compatibility; the tradeoff is maintaining generated code as the schema changes.
 
-`User.tasks` uses gqlgen's batch resolver support. gqlgen passes sibling users to one resolver call, which performs one bulk `WHERE user_id = ANY(...)` task query and groups the ordered results by user ID. This is request-execution batching for sibling fields, not a whole-request DataLoader cache.
+The project uses three main packages:
+- `cmd/server`: HTTP server, GraphQL handler, logging, and CORS.
+- `graph`: GraphQL schema, resolvers, and generated code.
+- `internal/store`: PostgreSQL operations using `pgxpool` and handwritten SQL.
 
-### Error and input handling
+A small store interface separates SQL from GraphQL logic and allows resolver unit testing, at the cost of a small amount of extra plumbing compared to calling `pgxpool` directly from resolvers.
 
-GraphQL IDs arrive as strings and are validated before being converted to PostgreSQL `BIGINT` values. Task dates are validated and returned as `YYYY-MM-DD`, matching the database `DATE` column and the required GraphQL `String` field. GraphQL task statuses are mapped explicitly to the lowercase PostgreSQL enum values.
+Task creation uses a transaction to ensure tasks and tags are inserted atomically. Task queries preload owners and bulk-load tags to reduce database queries. `internal/store` uses `pgxpool` with handwritten SQL rather than an ORM, which keeps the ordering, filtering, and rollback behavior explicit at the cost of more manual scan and mapping code.
 
-Missing records return `null` from nullable queries and useful errors from mutations. Unexpected database errors are logged on the server and returned to clients as a generic error so SQL details are not exposed.
+gqlgen's native batch resolver consolidates sibling `User.tasks` requests into a single bulk query without an additional DataLoader dependency. Its limitation is that it only batches sibling fields within one request; a DataLoader would add request-wide deduplication across multiple resolution paths, which is not needed here.
 
+Each resolver logs its name and duration in milliseconds via a deferred `slog` call, so timing appears in the structured JSON output alongside error logs.
 
-## -- Part 3
+GraphQL IDs are validated as positive PostgreSQL `BIGINT` values, statuses are mapped to database enums, and dates use `YYYY-MM-DD`. Missing records return `null` for nullable queries or an error for mutations. Unexpected database errors are logged without exposing SQL details to clients.
 
-I chose `description` as the required new field and also exposed `dueDate`. Both fields were already present in the GraphQL `Task` schema and populated from Postgres. I updated `web/app.js` to request them and render the description and formatted due date on each task card. This made the supplied UI more useful without adding a frontend framework.
+## 3. UI and API Improvements
 
-## API hardening
+I exposed both `description` and `dueDate` in the existing JavaScript UI. Both were already stored in PostgreSQL, so this required only GraphQL query and rendering changes.
 
-The root `users` and `tasks` queries support offset pagination with a default limit of 50, a maximum limit of 100, and a nonnegative offset. Results are ordered by ID before `LIMIT` and `OFFSET` are applied. The UI omits these arguments, so it continues to load the first 50 users. Offset pagination can skip or repeat records when concurrent writes occur; that tradeoff is acceptable for this assignment's small dataset.
+Root `users` and `tasks` queries support limit/offset pagination with a default of 50, a maximum of 100, and deterministic ID ordering. I chose offset pagination for simplicity, accepting that concurrent writes may cause skipped or repeated records.
 
-PostgreSQL integration tests use `TEST_DATABASE_URL`. Each run creates a uniquely named temporary schema, sets that schema as the pooled connections' `search_path`, applies `db/schema.sql`, and drops only that schema during cleanup. If the variable is absent, the integration suite skips cleanly. With the supplied Docker database running, use:
+## 4. Testing and Tradeoffs
+
+Resolver unit tests cover input validation and GraphQL-to-store behavior including not-found handling and default arguments. PostgreSQL integration tests verify filtering, pagination, relationship batching, nullable field persistence, transactions, and rollback using isolated temporary schemas.
+
+Integration tests use `TEST_DATABASE_URL` and a unique temporary PostgreSQL schema, which is removed afterward. Tests skip when the variable is absent.
+
+**Run integration tests with PostgreSQL running:**
 
 ```powershell
 $env:TEST_DATABASE_URL='postgres://admin:todo@localhost:5432/homework?sslmode=disable'
 go test ./...
 ```
 
+I intentionally skipped cursor pagination, request-wide caching, and deployment configuration. Further production improvements would include authentication, graceful shutdown, health checks, and distributed tracing.
+
+## 5. Running the Application
+
+From a fresh clone:
+
+```powershell
+git clone https://github.com/Samster101/go-interview-homework.git
+cd go-interview-homework
+
+docker compose up -d
+go run ./cmd/seed
+```
+
+In a separate terminal, start the API:
+
+```powershell
+go run ./cmd/server
+```
+
+The GraphQL playground is available at `http://localhost:8080`, and the API is at `http://localhost:8080/graphql`.
+
+To serve the UI from another terminal:
+
+```powershell
+python -m http.server 8081 --directory web
+```
+
+Open `http://localhost:8081`.
+
+Reviewed by: AS

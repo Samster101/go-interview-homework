@@ -18,6 +18,7 @@ type Postgres struct {
 	pool *pgxpool.Pool
 }
 
+// NewPostgres creates a connection pool and verifies connectivity to the database.
 func NewPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -104,12 +105,14 @@ func (p *Postgres) ListTasks(ctx context.Context, status *model.TaskStatus, user
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")
 	}
+	// Add pagination after filters so every value remains parameterized.
 	args = append(args, limit, offset)
 	clause := fmt.Sprintf("%s ORDER BY t.id LIMIT $%d OFFSET $%d", where, len(args)-1, len(args))
 	return p.queryTasks(ctx, clause, args...)
 }
 
 func (p *Postgres) ListTasksByUserIDs(ctx context.Context, status *model.TaskStatus, userIDs []int64) (map[int64][]*model.Task, error) {
+	// Seed empty groups so users without tasks resolve to an empty list.
 	grouped := make(map[int64][]*model.Task, len(userIDs))
 	for _, userID := range userIDs {
 		grouped[userID] = []*model.Task{}
@@ -118,6 +121,7 @@ func (p *Postgres) ListTasksByUserIDs(ctx context.Context, status *model.TaskSta
 		return grouped, nil
 	}
 
+	// Load all sibling relationships in one query to avoid an N+1 pattern.
 	args := []any{userIDs}
 	condition := `WHERE t.user_id = ANY($1::bigint[])`
 	if status != nil {
@@ -317,7 +321,6 @@ func attachTags(ctx context.Context, querier taskQuerier, tasks []*model.Task, t
 }
 
 func statusToDatabase(status model.TaskStatus) (string, error) {
-	// Map GraphQL status values to the database's lowercase enum values.
 	switch status {
 	case model.TaskStatusPending:
 		return "pending", nil

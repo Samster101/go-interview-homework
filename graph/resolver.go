@@ -6,10 +6,12 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Samster101/go-interview-homework/graph/model"
 )
 
+// TaskStore defines the data access methods required by the GraphQL resolvers.
 type TaskStore interface {
 	GetUser(ctx context.Context, id int64) (*model.User, error)
 	ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error)
@@ -30,6 +32,7 @@ func validatePagination(limit, offset int) error {
 	return nil
 }
 
+// Resolver is the root GraphQL resolver, holding shared dependencies.
 type Resolver struct {
 	Store  TaskStore
 	Logger *slog.Logger
@@ -68,4 +71,10 @@ func (r *Resolver) internalError(operation string, err error) error {
 		r.Logger.Error(operation, "error", err)
 	}
 	return errors.New("an internal error occurred")
+}
+
+func (r *Resolver) logTiming(field string, start time.Time) {
+	if r.Logger != nil {
+		r.Logger.Info("resolver", "field", field, "duration_ms", time.Since(start).Milliseconds())
+	}
 }

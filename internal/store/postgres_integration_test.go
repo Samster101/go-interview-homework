@@ -198,6 +198,7 @@ func newIntegrationPostgres(t *testing.T) *Postgres {
 		admin.Close()
 		t.Fatalf("parse test database URL: %v", err)
 	}
+	// Set search_path before opening the pool so every connection is isolated.
 	config.ConnConfig.RuntimeParams["search_path"] = schemaName
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
@@ -205,6 +206,7 @@ func newIntegrationPostgres(t *testing.T) *Postgres {
 		admin.Close()
 		t.Fatalf("create isolated test pool: %v", err)
 	}
+	// Cleanup drops only the schema created by this test run.
 	t.Cleanup(func() {
 		pool.Close()
 		if _, err := admin.Exec(context.Background(), "DROP SCHEMA "+quotedSchema+" CASCADE"); err != nil {
