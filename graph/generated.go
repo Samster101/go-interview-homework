@@ -45,9 +45,9 @@ type ComplexityRoot struct {
 
 	Query struct {
 		Task  func(childComplexity int, id string) int
-		Tasks func(childComplexity int, status *model.TaskStatus, userID *string) int
+		Tasks func(childComplexity int, status *model.TaskStatus, userID *string, limit int, offset int) int
 		User  func(childComplexity int, id string) int
-		Users func(childComplexity int) int
+		Users func(childComplexity int, limit int, offset int) int
 	}
 
 	Task struct {
@@ -78,12 +78,12 @@ type MutationResolver interface {
 }
 type QueryResolver interface {
 	User(ctx context.Context, id string) (*model.User, error)
-	Users(ctx context.Context) ([]*model.User, error)
+	Users(ctx context.Context, limit int, offset int) ([]*model.User, error)
 	Task(ctx context.Context, id string) (*model.Task, error)
-	Tasks(ctx context.Context, status *model.TaskStatus, userID *string) ([]*model.Task, error)
+	Tasks(ctx context.Context, status *model.TaskStatus, userID *string, limit int, offset int) ([]*model.Task, error)
 }
 type UserResolver interface {
-	Tasks(ctx context.Context, obj *model.User, status *model.TaskStatus) ([]*model.Task, error)
+	Tasks(ctx context.Context, objs []*model.User, status *model.TaskStatus) ([][]*model.Task, error)
 }
 
 // endregion ************************** generated!.gotpl **************************
@@ -148,7 +148,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Query.Tasks(childComplexity, args["status"].(*model.TaskStatus), args["userId"].(*string)), true
+		return e.ComplexityRoot.Query.Tasks(childComplexity, args["status"].(*model.TaskStatus), args["userId"].(*string), args["limit"].(int), args["offset"].(int)), true
 	case "Query.user":
 		if e.ComplexityRoot.Query.User == nil {
 			break
@@ -165,7 +165,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			break
 		}
 
-		return e.ComplexityRoot.Query.Users(childComplexity), true
+		args, err := ec.field_Query_users_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.Users(childComplexity, args["limit"].(int), args["offset"].(int)), true
 
 	case "Task.description":
 		if e.ComplexityRoot.Task.Description == nil {
@@ -606,6 +611,22 @@ func (ec *executionContext) field_Query_tasks_args(ctx context.Context, rawArgs 
 		return nil, err
 	}
 	args["userId"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "limit",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg2
+	arg3, err := graphql.ProcessArgField(ctx, rawArgs, "offset",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg3
 	return args, nil
 }
 
@@ -620,6 +641,28 @@ func (ec *executionContext) field_Query_user_args(ctx context.Context, rawArgs m
 		return nil, err
 	}
 	args["id"] = arg0
+	return args, nil
+}
+
+func (ec *executionContext) field_Query_users_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := graphql.ProcessArgField(ctx, rawArgs, "limit",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["limit"] = arg0
+	arg1, err := graphql.ProcessArgField(ctx, rawArgs, "offset",
+		func(ctx context.Context, v any) (int, error) {
+			return ec.unmarshalNInt2int(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["offset"] = arg1
 	return args, nil
 }
 
@@ -838,7 +881,8 @@ func (ec *executionContext) _Query_users(ctx context.Context, field graphql.Coll
 			return ec.fieldContext_Query_users(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			return ec.Resolvers.Query().Users(ctx)
+			fc := graphql.GetFieldContext(ctx)
+			return ec.Resolvers.Query().Users(ctx, fc.Args["limit"].(int), fc.Args["offset"].(int))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*model.User) graphql.Marshaler {
@@ -848,7 +892,7 @@ func (ec *executionContext) _Query_users(ctx context.Context, field graphql.Coll
 		true,
 	)
 }
-func (ec *executionContext) fieldContext_Query_users(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+func (ec *executionContext) fieldContext_Query_users(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
 	fc = &graphql.FieldContext{
 		Object:     "Query",
 		Field:      field,
@@ -857,6 +901,17 @@ func (ec *executionContext) fieldContext_Query_users(_ context.Context, field gr
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return ec.childFields_User(ctx, field)
 		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Query_users_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
 	}
 	return fc, nil
 }
@@ -915,7 +970,7 @@ func (ec *executionContext) _Query_tasks(ctx context.Context, field graphql.Coll
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Query().Tasks(ctx, fc.Args["status"].(*model.TaskStatus), fc.Args["userId"].(*string))
+			return ec.Resolvers.Query().Tasks(ctx, fc.Args["status"].(*model.TaskStatus), fc.Args["userId"].(*string), fc.Args["limit"].(int), fc.Args["offset"].(int))
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*model.Task) graphql.Marshaler {
@@ -1273,8 +1328,7 @@ func (ec *executionContext) _User_tasks(ctx context.Context, field graphql.Colle
 			return ec.fieldContext_User_tasks(ctx, field)
 		},
 		func(ctx context.Context) (any, error) {
-			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.User().Tasks(ctx, obj, fc.Args["status"].(*model.TaskStatus))
+			return ec.resolveBatch_User_tasks(ctx, field, obj)
 		},
 		nil,
 		func(ctx context.Context, selections ast.SelectionSet, v []*model.Task) graphql.Marshaler {
@@ -1306,6 +1360,41 @@ func (ec *executionContext) fieldContext_User_tasks(ctx context.Context, field g
 		return fc, err
 	}
 	return fc, nil
+}
+func (ec *executionContext) resolveBatch_User_tasks(ctx context.Context, field graphql.CollectedField, obj *model.User) (any, error) {
+	resolver := ec.Resolvers.User()
+	fc := graphql.GetFieldContext(ctx)
+	group := graphql.GetBatchParentGroup(ctx, "User")
+	if group != nil {
+		parents, ok := group.Parents.([]*model.User)
+		if ok {
+			idx, ok := graphql.BatchParentIndex(ctx)
+			if ok {
+				key := field.Alias
+				if key == "" {
+					key = field.Name
+				}
+				result := group.GetFieldResult(key, func() (any, error) {
+					return resolver.Tasks(ctx, parents, fc.Args["status"].(*model.TaskStatus))
+				})
+				return graphql.ResolveBatchGroupResult[[]*model.Task](
+					ctx,
+					idx,
+					len(parents),
+					result,
+					"User.tasks",
+					group.IndexMap,
+				)
+			}
+		}
+	}
+	results, err := resolver.Tasks(ctx, []*model.User{obj}, fc.Args["status"].(*model.TaskStatus))
+	return graphql.ResolveBatchSingleResult[[]*model.Task](
+		ctx,
+		results,
+		err,
+		"User.tasks",
+	)
 }
 
 func (ec *executionContext) ___Directive_name(ctx context.Context, field graphql.CollectedField, obj *introspection.Directive) (ret graphql.Marshaler) {
@@ -3151,6 +3240,22 @@ func (ec *executionContext) marshalNID2string(ctx context.Context, sel ast.Selec
 	return res
 }
 
+func (ec *executionContext) unmarshalNInt2int(ctx context.Context, v any) (int, error) {
+	res, err := graphql.UnmarshalInt(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNInt2int(ctx context.Context, sel ast.SelectionSet, v int) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalInt(v)
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
 func (ec *executionContext) unmarshalNString2string(ctx context.Context, v any) (string, error) {
 	res, err := graphql.UnmarshalString(v)
 	return res, graphql.ErrorOnPath(ctx, err)
@@ -3201,6 +3306,7 @@ func (ec *executionContext) marshalNTask2githubᚗcomᚋSamster101ᚋgoᚑinterv
 }
 
 func (ec *executionContext) marshalNTask2ᚕᚖgithubᚗcomᚋSamster101ᚋgoᚑinterviewᚑhomeworkᚋgraphᚋmodelᚐTaskᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.Task) graphql.Marshaler {
+	ctx = graphql.WithBatchParents(ctx, "Task", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3237,6 +3343,7 @@ func (ec *executionContext) marshalNTaskStatus2githubᚗcomᚋSamster101ᚋgoᚑ
 }
 
 func (ec *executionContext) marshalNUser2ᚕᚖgithubᚗcomᚋSamster101ᚋgoᚑinterviewᚑhomeworkᚋgraphᚋmodelᚐUserᚄ(ctx context.Context, sel ast.SelectionSet, v []*model.User) graphql.Marshaler {
+	ctx = graphql.WithBatchParents(ctx, "User", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3267,6 +3374,7 @@ func (ec *executionContext) marshalN__Directive2githubᚗcomᚋ99designsᚋgqlge
 }
 
 func (ec *executionContext) marshalN__Directive2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐDirectiveᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.Directive) graphql.Marshaler {
+	ctx = graphql.WithBatchParents(ctx, "__Directive", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3341,6 +3449,7 @@ func (ec *executionContext) marshalN__InputValue2githubᚗcomᚋ99designsᚋgqlg
 }
 
 func (ec *executionContext) marshalN__InputValue2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐInputValueᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.InputValue) graphql.Marshaler {
+	ctx = graphql.WithBatchParents(ctx, "__InputValue", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3361,6 +3470,7 @@ func (ec *executionContext) marshalN__Type2githubᚗcomᚋ99designsᚋgqlgenᚋg
 }
 
 func (ec *executionContext) marshalN__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgenᚋgraphqlᚋintrospectionᚐTypeᚄ(ctx context.Context, sel ast.SelectionSet, v []introspection.Type) graphql.Marshaler {
+	ctx = graphql.WithBatchParents(ctx, "__Type", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3537,6 +3647,7 @@ func (ec *executionContext) marshalO__EnumValue2ᚕgithubᚗcomᚋ99designsᚋgq
 	if v == nil {
 		return graphql.Null
 	}
+	ctx = graphql.WithBatchParents(ctx, "__EnumValue", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3556,6 +3667,7 @@ func (ec *executionContext) marshalO__Field2ᚕgithubᚗcomᚋ99designsᚋgqlgen
 	if v == nil {
 		return graphql.Null
 	}
+	ctx = graphql.WithBatchParents(ctx, "__Field", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3575,6 +3687,7 @@ func (ec *executionContext) marshalO__InputValue2ᚕgithubᚗcomᚋ99designsᚋg
 	if v == nil {
 		return graphql.Null
 	}
+	ctx = graphql.WithBatchParents(ctx, "__InputValue", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]
@@ -3601,6 +3714,7 @@ func (ec *executionContext) marshalO__Type2ᚕgithubᚗcomᚋ99designsᚋgqlgen�
 	if v == nil {
 		return graphql.Null
 	}
+	ctx = graphql.WithBatchParents(ctx, "__Type", v, nil)
 	ret := graphql.MarshalSliceConcurrently(ctx, len(v), 0, false, func(ctx context.Context, i int) graphql.Marshaler {
 		fc := graphql.GetFieldContext(ctx)
 		fc.Result = &v[i]

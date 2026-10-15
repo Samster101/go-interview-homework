@@ -23,3 +23,4 @@ models:
     fields:
       tasks:
         resolver: true
+        batch: true

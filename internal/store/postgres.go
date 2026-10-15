@@ -50,8 +50,8 @@ func (p *Postgres) GetUser(ctx context.Context, id int64) (*model.User, error) {
 	return &user, nil
 }
 
-func (p *Postgres) ListUsers(ctx context.Context) ([]*model.User, error) {
-	rows, err := p.pool.Query(ctx, `SELECT id, email, name FROM users ORDER BY id`)
+func (p *Postgres) ListUsers(ctx context.Context, limit, offset int) ([]*model.User, error) {
+	rows, err := p.pool.Query(ctx, `SELECT id, email, name FROM users ORDER BY id LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -74,7 +74,7 @@ func (p *Postgres) ListUsers(ctx context.Context) ([]*model.User, error) {
 }
 
 func (p *Postgres) GetTask(ctx context.Context, id int64) (*model.Task, error) {
-	tasks, err := p.queryTasks(ctx, `WHERE t.id = $1`, id)
+	tasks, err := p.queryTasks(ctx, `WHERE t.id = $1 ORDER BY t.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (p *Postgres) GetTask(ctx context.Context, id int64) (*model.Task, error) {
 	return tasks[0], nil
 }
 
-func (p *Postgres) ListTasks(ctx context.Context, status *model.TaskStatus, userID *int64) ([]*model.Task, error) {
+func (p *Postgres) ListTasks(ctx context.Context, status *model.TaskStatus, userID *int64, limit, offset int) ([]*model.Task, error) {
 	conditions := make([]string, 0, 2)
 	args := make([]any, 0, 2)
 	if status != nil {
@@ -104,7 +104,42 @@ func (p *Postgres) ListTasks(ctx context.Context, status *model.TaskStatus, user
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")
 	}
-	return p.queryTasks(ctx, where, args...)
+	args = append(args, limit, offset)
+	clause := fmt.Sprintf("%s ORDER BY t.id LIMIT $%d OFFSET $%d", where, len(args)-1, len(args))
+	return p.queryTasks(ctx, clause, args...)
+}
+
+func (p *Postgres) ListTasksByUserIDs(ctx context.Context, status *model.TaskStatus, userIDs []int64) (map[int64][]*model.Task, error) {
+	grouped := make(map[int64][]*model.Task, len(userIDs))
+	for _, userID := range userIDs {
+		grouped[userID] = []*model.Task{}
+	}
+	if len(userIDs) == 0 {
+		return grouped, nil
+	}
+
+	args := []any{userIDs}
+	condition := `WHERE t.user_id = ANY($1::bigint[])`
+	if status != nil {
+		databaseStatus, err := statusToDatabase(*status)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, databaseStatus)
+		condition += ` AND t.status = $2::task_status`
+	}
+	tasks, err := p.queryTasks(ctx, condition+` ORDER BY t.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range tasks {
+		userID, err := strconv.ParseInt(task.User.ID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("parse task user ID: %w", err)
+		}
+		grouped[userID] = append(grouped[userID], task)
+	}
+	return grouped, nil
 }
 
 func (p *Postgres) CreateTask(ctx context.Context, userID int64, title string, description, dueDate *string, tags []string) (*model.Task, error) {
@@ -184,7 +219,7 @@ type taskQuerier interface {
 }
 
 func queryOneTask(ctx context.Context, querier taskQuerier, id int64) (*model.Task, error) {
-	tasks, err := queryTasks(ctx, querier, `WHERE t.id = $1`, id)
+	tasks, err := queryTasks(ctx, querier, `WHERE t.id = $1 ORDER BY t.id`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +238,7 @@ func queryTasks(ctx context.Context, querier taskQuerier, where string, args ...
 	query := `SELECT t.id, t.title, t.description, t.status::text, t.due_date::text,
 	                 u.id, u.email, u.name
 	          FROM tasks t
-	          JOIN users u ON u.id = t.user_id ` + where + ` ORDER BY t.id`
+	          JOIN users u ON u.id = t.user_id ` + where
 	rows, err := querier.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)

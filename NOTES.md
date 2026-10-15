@@ -21,7 +21,7 @@ I kept the structure small. `cmd/server` configures the HTTP server, GraphQL han
 
 The PostgreSQL store uses pgxpool. Task creation and tag insertion run in one transaction so a failed tag insert cannot leave a partial task. Task queries preload the owning user because `Task.user` is required, and tags are fetched with one bulk query rather than one query per task.
 
-I used straightforward field resolvers for `User.tasks`. With the small seeded dataset, this can be easier to understand than adding a DataLoader. For a larger dataset, I would batch those relationship queries to avoid an N+1 pattern.
+`User.tasks` uses gqlgen's batch resolver support. gqlgen passes sibling users to one resolver call, which performs one bulk `WHERE user_id = ANY(...)` task query and groups the ordered results by user ID. This is request-execution batching for sibling fields, not a whole-request DataLoader cache.
 
 ### Error and input handling
 
@@ -33,4 +33,15 @@ Missing records return `null` from nullable queries and useful errors from mutat
 ## -- Part 3
 
 I chose `description` as the required new field and also exposed `dueDate`. Both fields were already present in the GraphQL `Task` schema and populated from Postgres. I updated `web/app.js` to request them and render the description and formatted due date on each task card. This made the supplied UI more useful without adding a frontend framework.
+
+## API hardening
+
+The root `users` and `tasks` queries support offset pagination with a default limit of 50, a maximum limit of 100, and a nonnegative offset. Results are ordered by ID before `LIMIT` and `OFFSET` are applied. The UI omits these arguments, so it continues to load the first 50 users. Offset pagination can skip or repeat records when concurrent writes occur; that tradeoff is acceptable for this assignment's small dataset.
+
+PostgreSQL integration tests use `TEST_DATABASE_URL`. Each run creates a uniquely named temporary schema, sets that schema as the pooled connections' `search_path`, applies `db/schema.sql`, and drops only that schema during cleanup. If the variable is absent, the integration suite skips cleanly. With the supplied Docker database running, use:
+
+```powershell
+$env:TEST_DATABASE_URL='postgres://admin:todo@localhost:5432/homework?sslmode=disable'
+go test ./...
+```
 

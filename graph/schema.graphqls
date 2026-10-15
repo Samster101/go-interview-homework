@@ -23,9 +23,9 @@ enum TaskStatus {
 
 type Query {
   user(id: ID!): User
-  users: [User!]!
+  users(limit: Int! = 50, offset: Int! = 0): [User!]!
   task(id: ID!): Task
-  tasks(status: TaskStatus, userId: ID): [Task!]!
+  tasks(status: TaskStatus, userId: ID, limit: Int! = 50, offset: Int! = 0): [Task!]!
 }
 
 type Mutation {

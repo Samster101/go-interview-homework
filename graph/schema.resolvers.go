@@ -81,8 +81,11 @@ func (r *queryResolver) User(ctx context.Context, id string) (*model.User, error
 }
 
 // Users is the resolver for the users field.
-func (r *queryResolver) Users(ctx context.Context) ([]*model.User, error) {
-	users, err := r.Store.ListUsers(ctx)
+func (r *queryResolver) Users(ctx context.Context, limit int, offset int) ([]*model.User, error) {
+	if err := validatePagination(limit, offset); err != nil {
+		return nil, err
+	}
+	users, err := r.Store.ListUsers(ctx, limit, offset)
 	if err != nil {
 		return nil, r.internalError("list users", err)
 	}
@@ -106,7 +109,10 @@ func (r *queryResolver) Task(ctx context.Context, id string) (*model.Task, error
 }
 
 // Tasks is the resolver for the tasks field.
-func (r *queryResolver) Tasks(ctx context.Context, status *model.TaskStatus, userID *string) ([]*model.Task, error) {
+func (r *queryResolver) Tasks(ctx context.Context, status *model.TaskStatus, userID *string, limit int, offset int) ([]*model.Task, error) {
+	if err := validatePagination(limit, offset); err != nil {
+		return nil, err
+	}
 	var databaseUserID *int64
 	if userID != nil {
 		id, err := parseID(*userID)
@@ -115,24 +121,35 @@ func (r *queryResolver) Tasks(ctx context.Context, status *model.TaskStatus, use
 		}
 		databaseUserID = &id
 	}
-	tasks, err := r.Store.ListTasks(ctx, status, databaseUserID)
+	tasks, err := r.Store.ListTasks(ctx, status, databaseUserID, limit, offset)
 	if err != nil {
 		return nil, r.internalError("list tasks", err)
 	}
 	return tasks, nil
 }
 
-// Tasks is the resolver for the tasks field.
-func (r *userResolver) Tasks(ctx context.Context, obj *model.User, status *model.TaskStatus) ([]*model.Task, error) {
-	userID, err := parseID(obj.ID)
-	if err != nil {
-		return nil, r.internalError("resolve user tasks", err)
+// Tasks is the batch resolver for the tasks field.
+func (r *userResolver) Tasks(ctx context.Context, objs []*model.User, status *model.TaskStatus) ([][]*model.Task, error) {
+	userIDs := make([]int64, len(objs))
+	for i, obj := range objs {
+		userID, err := parseID(obj.ID)
+		if err != nil {
+			return nil, r.internalError("resolve user tasks", err)
+		}
+		userIDs[i] = userID
 	}
-	tasks, err := r.Store.ListTasks(ctx, status, &userID)
+	grouped, err := r.Store.ListTasksByUserIDs(ctx, status, userIDs)
 	if err != nil {
 		return nil, r.internalError("list user tasks", err)
 	}
-	return tasks, nil
+	results := make([][]*model.Task, len(userIDs))
+	for i, userID := range userIDs {
+		results[i] = grouped[userID]
+		if results[i] == nil {
+			results[i] = []*model.Task{}
+		}
+	}
+	return results, nil
 }
 
 // Mutation returns MutationResolver implementation.
